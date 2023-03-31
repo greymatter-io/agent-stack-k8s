@@ -12,6 +12,7 @@ import (
 	"github.com/buildkite/agent-stack-k8s/v2/internal/monitor"
 	"github.com/buildkite/agent-stack-k8s/v2/internal/version"
 	"github.com/buildkite/agent/v3/clicommand"
+
 	"go.uber.org/zap"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -22,6 +23,8 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/pointer"
+
+	externalsecretsv1beta1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1beta1"
 )
 
 const (
@@ -54,10 +57,11 @@ func NewInformerFactory(k8s kubernetes.Interface, tags []string) (informers.Shar
 }
 
 type KubernetesPlugin struct {
-	PodSpec    *corev1.PodSpec
-	GitEnvFrom []corev1.EnvFromSource
-	Sidecars   []corev1.Container `json:"sidecars,omitempty"`
-	Metadata   Metadata
+	PodSpec            *corev1.PodSpec
+	ExternalSecretSpec *externalsecretsv1beta1.ExternalSecretSpec
+	GitEnvFrom         []corev1.EnvFromSource
+	Sidecars           []corev1.Container `json:"sidecars,omitempty"`
+	Metadata           Metadata
 }
 
 type Metadata struct {
@@ -75,6 +79,7 @@ func (w *worker) Create(ctx context.Context, job *monitor.Job) error {
 	logger := w.logger.With(zap.String("uuid", job.Uuid))
 	logger.Info("creating job")
 	jobWrapper := NewJobWrapper(w.logger, job, w.cfg).ParsePlugins()
+	fmt.Printf("%+v\n", jobWrapper.k8sPlugin.ExternalSecretSpec)
 	kjob, err := jobWrapper.Build()
 	if err != nil {
 		kjob, err = jobWrapper.BuildFailureJob(err)
@@ -82,6 +87,7 @@ func (w *worker) Create(ctx context.Context, job *monitor.Job) error {
 			return fmt.Errorf("failed to create job: %w", err)
 		}
 	}
+
 	_, err = w.client.BatchV1().Jobs(w.cfg.Namespace).Create(ctx, kjob, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsInvalid(err) {
@@ -98,6 +104,34 @@ func (w *worker) Create(ctx context.Context, job *monitor.Job) error {
 			return err
 		}
 	}
+
+	// externalSecret := &externalsecretsv1beta1.ExternalSecret{
+	// 	ObjectMeta: v1.ObjectMeta{
+	// 		Name:      "build-test",
+	// 		Namespace: "buildkite",
+	// 	},
+	// 	Spec: *jobWrapper.k8sPlugin.ExternalSecretSpec,
+	// }
+
+	// externalSecret.Kind = "ExternalSecret"
+	// externalSecret.APIVersion = "external-secrets.io/v1beta1"
+
+	// // Hopefully there is another way to apply this? I dont like having to use the rest client
+	// // but ExternalSecrets doesn't appear to have a client I can import
+	// restClient := w.client.CoreV1().RESTClient()
+	// err = restClient.
+	// 	Post().
+	// 	Namespace("buildkite").
+	// 	AbsPath("/apis/external-secrets.io/v1beta1").
+	// 	Resource("externalsecrets").
+	// 	Body(externalSecret).
+	// 	Do(context.Background()).
+	// 	Error()
+	// if err != nil {
+	// 	return fmt.Errorf("Failed to create ExternalSecret: %w ", err)
+	// }
+	// logger.Info("ExternalSecret created successfully")
+
 	return nil
 }
 
@@ -139,6 +173,7 @@ func (w *jobWrapper) ParsePlugins() *jobWrapper {
 			return w
 		}
 		if val, ok := plugin["github.com/buildkite-plugins/kubernetes-buildkite-plugin"]; ok {
+			fmt.Printf("\n\n%s\n\n", string(val))
 			if err := json.Unmarshal(val, &w.k8sPlugin); err != nil {
 				w.err = fmt.Errorf("failed parsing Kubernetes plugin: %w", err)
 				return w
@@ -149,6 +184,7 @@ func (w *jobWrapper) ParsePlugins() *jobWrapper {
 			}
 		}
 	}
+	fmt.Printf("\n\n%+v\n\n", w.k8sPlugin)
 	return w
 }
 

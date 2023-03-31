@@ -30,7 +30,7 @@ gomod:
   go mod tidy
   git diff -G. --no-ext-diff --exit-code go.mod go.sum
 
-agent target os=("linux") arch=("amd64 arm64"):
+agent target os=("linux") arch=("amd64"):
   #!/usr/bin/env bash
   set -euxo pipefail
   pushd agent
